@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Viewer Point Cloud / Gaussian Splatting - .ply</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000000;
+    overflow: hidden;
+    font-family: Cambria, 'Times New Roman', serif;
+  }
+  #viewport { width: 100vw; height: 100vh; display: block; }
+
+  /* Kotak drop file di tengah */
+  #dropZone {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: #e5e5e5; text-align: center; z-index: 25;
+    background: rgba(0,0,0,0.65);
+  }
+  #dropZone .box {
+    border: 1px dashed #666; padding: 28px 36px; border-radius: 6px;
+    background: rgba(15,15,15,0.9);
+    max-width: 480px;
+  }
+  #dropZone h1 { font-size: 20px; font-weight: normal; margin: 0 0 10px 0; letter-spacing: 0.5px; }
+  #dropZone p { font-size: 14px; color: #aaa; margin: 4px 0; }
+  #dropZone .errMsg { color: #e07b6a; font-size: 12.5px; margin-top: 10px; display: none; line-height: 1.4; }
+  #fileInput { margin-top: 14px; font-family: Cambria, serif; color: #ddd; }
+
+  /* Judul utama di bagian atas */
+  #titleBar {
+    position: absolute; top: 0; left: 0; width: 100%; z-index: 15;
+    text-align: center;
+    padding: 18px 10px 14px 10px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.0) 100%);
+    pointer-events: none;
+  }
+  #titleBar h1 {
+    margin: 0;
+    color: #f4e3c4;
+    font-family: Cambria, 'Times New Roman', serif;
+    font-weight: bold;
+    font-size: clamp(20px, 3.5vw, 36px);
+    letter-spacing: 0.5px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.9);
+  }
+  #titleBar p {
+    margin: 6px 0 0 0;
+    color: #d8d8d8;
+    font-size: clamp(11px, 1.2vw, 15px);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  }
+
+  /* Galeri 3 Gambar di Pojok Kanan Atas (Tanpa Outline Kuning & Berbentuk Persegi) */
+  #topRightGallery {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(4px);
+  }
+  #topRightGallery img {
+    width: 70px;
+    height: 70px;
+    object-fit: contain;
+    border: none; /* Menghapus outline/border */
+    box-shadow: none;
+    transition: transform 0.2s ease;
+  }
+  #topRightGallery img:hover {
+    transform: scale(1.08);
+  }
+
+  /* Info box pojok kiri bawah */
+  #infoBox {
+    position: absolute; left: 16px; bottom: 16px; z-index: 10;
+    color: #f0f0f0;
+    background: rgba(0,0,0,0.55);
+    padding: 10px 14px;
+    border-left: 2px solid #cfa15a;
+    max-width: 420px;
+    line-height: 1.45;
+    font-family: Cambria, 'Times New Roman', serif;
+    font-size: clamp(11px, 1.15vw, 14px);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  }
+
+  #loadingMsg {
+    position: absolute; top: 20px; left: 20px; z-index: 10;
+    color: #cfa15a; font-family: Cambria, serif; font-size: 13px;
+    background: rgba(0,0,0,0.65); padding: 8px 14px; border-radius: 4px;
+    display: none; border: 1px solid #444;
+  }
+
+  /* Gizmo orbit */
+  #gizmoWrap {
+    position: absolute; right: 14px; bottom: 16px; z-index: 10;
+    width: 110px; height: 110px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid #333;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #gizmoCanvasHolder { width: 100px; height: 100px; }
+  #gizmoLegend {
+    position: absolute; right: 132px; bottom: 20px; z-index: 10;
+    font-family: Cambria, serif; font-size: 11px; color: #ccc;
+    background: rgba(0,0,0,0.5); padding: 6px 8px; border-radius: 4px;
+    line-height: 1.5;
+  }
+  #gizmoLegend span.dotX { color: #e05555; }
+  #gizmoLegend span.dotY { color: #55c76a; }
+  #gizmoLegend span.dotZ { color: #5a8fe0; }
+</style>
+</head>
+<body>
+
+<div id="viewport"></div>
+
+<!-- Container 3 Gambar Kanan Atas -->
+<div id="topRightGallery">
+  <img id="imgTop1" src="" alt="Gambar 1">
+  <img id="imgTop2" src="" alt="Gambar 2">
+  <img id="imgTop3" src="" alt="Gambar 3">
+</div>
+
+<div id="dropZone">
+  <div class="box">
+    <h1>Muat File Gaussian Splatting (.PLY)</h1>
+    <p>Pilih file secara manual atau tarik file .ply ke area ini.</p>
+    <input type="file" id="fileInput" accept=".ply">
+    <div id="errMsg" class="errMsg"></div>
+  </div>
+</div>
+
+<div id="loadingMsg">Memproses & Memuat File PLY...</div>
+
+<div id="infoBox">
+  <strong>Pemodelan Hutan 3D dengan Gaussian Splatting</strong> <br>
+  Petak 28, Dusun Sumberurip, Desa Barurejo, Kecamatan Siliragung, Kabupaten Banyuwangi <br>
+  Tim KKN-PPM UGM Periode II Sumilir Siliragung 2026
+</div>
+
+<div id="gizmoWrap"><div id="gizmoCanvasHolder"></div></div>
+<div id="gizmoLegend">
+  <span class="dotX">&#9679;</span> Sumbu X<br>
+  <span class="dotY">&#9679;</span> Sumbu Y<br>
+  <span class="dotZ">&#9679;</span> Sumbu Z
+</div>
+
+<script>
+(function () {
+
+  const PLY_FILE_PATH = "./Sumberurip_Fix.ply"; 
+ 
+  const IMAGE_PATH_1 = "./Lambang UGM-putih.png";
+  const IMAGE_PATH_2 = "./logo_kkn.png";
+  const IMAGE_PATH_3 = "./LOGO.png";
+
+  const ROTATE_180 = true;      
+  const ROTATE_180_AXIS = 'x';  
+
+  document.getElementById('imgTop1').src = IMAGE_PATH_1;
+  document.getElementById('imgTop2').src = IMAGE_PATH_2;
+  document.getElementById('imgTop3').src = IMAGE_PATH_3;
+
+  const viewport = document.getElementById('viewport');
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const errMsg = document.getElementById('errMsg');
+  const loadingMsg = document.getElementById('loadingMsg');
+
+  // Scene Setup
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 5000);
+  camera.position.set(0, 0, 3);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  viewport.appendChild(renderer.domElement);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  let pointCloud = null;
+  let sortWorker = null;
+
+  // Web Worker Script untuk Radix Sort (Depth Sorting)
+  const workerCode = `
+    let positions = null;
+
+    self.onmessage = function(e) {
+      if (e.data.positions) {
+        positions = new Float32Array(e.data.positions);
+        return;
+      }
+      if (!positions) return;
+
+      const viewMatrix = e.data.viewMatrix;
+      const count = positions.length / 3;
+
+      const indices = new Uint32Array(count);
+      const depths = new Float32Array(count);
+
+      // Hitung jarak (Z-depth) setiap titik terhadap arah pandang kamera
+      for (let i = 0; i < count; i++) {
+        indices[i] = i;
+        const x = positions[i * 3 + 0];
+        const y = positions[i * 3 + 1];
+        const z = positions[i * 3 + 2];
+        depths[i] = -(viewMatrix[2] * x + viewMatrix[6] * y + viewMatrix[10] * z + viewMatrix[14]);
+      }
+
+      // Pengurutan Back-to-Front (terjauh ke terdekat)
+      indices.sort((a, b) => depths[b] - depths[a]);
+
+      self.postMessage({ indices: indices.buffer }, [indices.buffer]);
+    };
+  `;
+
+  function initWorker() {
+    if (sortWorker) sortWorker.terminate();
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    sortWorker = new Worker(URL.createObjectURL(blob));
+  }
+
+  // Controls
+  const controls = {
+    target: new THREE.Vector3(0, 0, 0),
+    spherical: new THREE.Spherical(3, Math.PI / 2.4, Math.PI / 4),
+    isRotating: false,
+    isPanning: false,
+    lastX: 0,
+    lastY: 0,
+    panSpeed: 0.0025,
+    rotateSpeed: 0.006,
+    zoomSpeed: 0.001
+  };
+
+  function updateCameraFromControls() {
+    const offset = new THREE.Vector3().setFromSpherical(controls.spherical);
+    camera.position.copy(controls.target).add(offset);
+    camera.lookAt(controls.target);
+    triggerDepthSort();
+  }
+
+  renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+  renderer.domElement.addEventListener('mousedown', (e) => {
+    if (e.button === 0) controls.isRotating = true;
+    if (e.button === 2) controls.isPanning = true;
+    controls.lastX = e.clientX;
+    controls.lastY = e.clientY;
+  });
+
+  window.addEventListener('mouseup', () => {
+    controls.isRotating = false;
+    controls.isPanning = false;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    const dx = e.clientX - controls.lastX;
+    const dy = e.clientY - controls.lastY;
+    controls.lastX = e.clientX;
+    controls.lastY = e.clientY;
+
+    if (controls.isRotating) {
+      controls.spherical.theta -= dx * controls.rotateSpeed;
+      controls.spherical.phi -= dy * controls.rotateSpeed;
+      controls.spherical.phi = Math.max(0.05, Math.min(Math.PI - 0.05, controls.spherical.phi));
+      updateCameraFromControls();
+    } else if (controls.isPanning) {
+      const distFactor = controls.spherical.radius * controls.panSpeed;
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3(0, 1, 0);
+      camera.getWorldDirection(right);
+      right.cross(up).normalize();
+      const camUp = new THREE.Vector3().crossVectors(right, new THREE.Vector3().subVectors(camera.position, controls.target)).normalize();
+      controls.target.addScaledVector(right, -dx * distFactor);
+      controls.target.addScaledVector(camUp, dy * distFactor);
+      updateCameraFromControls();
+    }
+  });
+
+  renderer.domElement.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    controls.spherical.radius *= (1 + e.deltaY * controls.zoomSpeed);
+    controls.spherical.radius = Math.max(0.01, Math.min(2000, controls.spherical.radius));
+    updateCameraFromControls();
+  }, { passive: false });
+
+  // Gizmo Setup
+  const gizmoHolder = document.getElementById('gizmoCanvasHolder');
+  const gizmoScene = new THREE.Scene();
+  const gizmoCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  gizmoCamera.position.set(0, 0, 4);
+  const gizmoRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  gizmoRenderer.setPixelRatio(window.devicePixelRatio);
+  gizmoRenderer.setSize(100, 100);
+  gizmoHolder.appendChild(gizmoRenderer.domElement);
+
+  const gizmoAxes = new THREE.Group();
+  gizmoScene.add(gizmoAxes);
+
+  const gizmoSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x555555, wireframe: true, transparent: true, opacity: 0.3 })
+  );
+  gizmoAxes.add(gizmoSphere);
+
+  function makeAxis(color, dir) {
+    const points = [new THREE.Vector3(0, 0, 0), dir.clone().multiplyScalar(1.15)];
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color: color, linewidth: 2 })
+    );
+    gizmoAxes.add(line);
+
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), new THREE.MeshBasicMaterial({ color: color }));
+    tip.position.copy(dir.clone().multiplyScalar(1.15));
+    gizmoAxes.add(tip);
+  }
+  makeAxis(0xe05555, new THREE.Vector3(1, 0, 0));
+  makeAxis(0x55c76a, new THREE.Vector3(0, 1, 0));
+  makeAxis(0x5a8fe0, new THREE.Vector3(0, 0, 1));
+
+  function updateGizmo() {
+    const q = camera.quaternion.clone().invert();
+    gizmoAxes.quaternion.copy(q);
+    gizmoRenderer.render(gizmoScene, gizmoCamera);
+  }
+
+  // PLY Parser
+  function parsePLY(buffer) {
+    const decoder = new TextDecoder('ascii');
+    const bytes = new Uint8Array(buffer);
+
+    let headerText = '';
+    let i = 0;
+    const marker = 'end_header';
+    const chunkSize = 65536;
+    let searchStr = '';
+    while (i < bytes.length) {
+      const slice = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      searchStr += decoder.decode(slice, { stream: true });
+      const idx = searchStr.indexOf(marker);
+      if (idx !== -1) {
+        headerText = searchStr.substring(0, idx + marker.length);
+        break;
+      }
+      i += chunkSize;
+    }
+    if (!headerText) throw new Error('Header PLY tidak valid.');
+
+    const headerByteLength = new TextEncoder().encode(headerText).length + 1;
+    const lines = headerText.split('\n').map(l => l.trim()).filter(Boolean);
+
+    let format = 'ascii';
+    let vertexCount = 0;
+    const properties = [];
+    let inVertexElement = false;
+
+    for (const line of lines) {
+      const parts = line.split(/\s+/);
+      if (parts[0] === 'format') {
+        format = parts[1];
+      } else if (parts[0] === 'element') {
+        inVertexElement = (parts[1] === 'vertex');
+        if (inVertexElement) vertexCount = parseInt(parts[2], 10);
+      } else if (parts[0] === 'property' && inVertexElement) {
+        properties.push({ type: parts[1], name: parts[2] });
+      }
+    }
+
+    const typeSizes = {
+      char: 1, uchar: 1, int8: 1, uint8: 1,
+      short: 2, ushort: 2, int16: 2, uint16: 2,
+      int: 4, uint: 4, int32: 4, uint32: 4,
+      float: 4, float32: 4, double: 8, float64: 8
+    };
+
+    const positions = new Float32Array(vertexCount * 3);
+    const colors = new Float32Array(vertexCount * 3);
+    const sizes = new Float32Array(vertexCount);
+    const alphas = new Float32Array(vertexCount);
+
+    const nameIndex = {};
+    properties.forEach((p, idx) => { nameIndex[p.name] = idx; });
+
+    const findIdx = (...candidates) => {
+      for (const c of candidates) if (nameIndex[c] !== undefined) return nameIndex[c];
+      return -1;
+    };
+
+    const ix = findIdx('x'), iy = findIdx('y'), iz = findIdx('z');
+    const ir = findIdx('red', 'r', 'diffuse_red');
+    const ig = findIdx('green', 'g', 'diffuse_green');
+    const ib = findIdx('blue', 'b', 'diffuse_blue');
+    const ifdc0 = findIdx('f_dc_0'), ifdc1 = findIdx('f_dc_1'), ifdc2 = findIdx('f_dc_2');
+    const iOpacity = findIdx('opacity');
+    const iScale0 = findIdx('scale_0'), iScale1 = findIdx('scale_1'), iScale2 = findIdx('scale_2');
+
+    const SH_C0 = 0.28209479177387814;
+    const sigmoid = (x) => 1 / (1 + Math.exp(-x));
+
+    if (ix === -1 || iy === -1 || iz === -1) {
+      throw new Error('Properti x, y, z tidak ditemukan.');
+    }
+
+    const hasDirectRGB = ir !== -1 && ig !== -1 && ib !== -1;
+    const hasSHColor = ifdc0 !== -1 && ifdc1 !== -1 && ifdc2 !== -1;
+    const hasOpacity = iOpacity !== -1;
+    const hasScale = iScale0 !== -1 && iScale1 !== -1 && iScale2 !== -1;
+
+    function assignColor(v, r, g, b) {
+      colors[v * 3 + 0] = r; colors[v * 3 + 1] = g; colors[v * 3 + 2] = b;
+    }
+
+    if (format === 'ascii') {
+      const bodyText = decoder.decode(bytes.subarray(headerByteLength));
+      const rows = bodyText.split('\n');
+      let rowPtr = 0;
+      for (let v = 0; v < vertexCount; v++) {
+        while (rows[rowPtr] !== undefined && rows[rowPtr].trim() === '') rowPtr++;
+        if (!rows[rowPtr]) break;
+        const vals = rows[rowPtr].trim().split(/\s+/).map(Number);
+        rowPtr++;
+        positions[v * 3 + 0] = vals[ix]; positions[v * 3 + 1] = vals[iy]; positions[v * 3 + 2] = vals[iz];
+        if (hasDirectRGB) {
+          assignColor(v, vals[ir] / 255, vals[ig] / 255, vals[ib] / 255);
+        } else if (hasSHColor) {
+          assignColor(v,
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * vals[ifdc0])),
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * vals[ifdc1])),
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * vals[ifdc2])));
+        } else {
+          assignColor(v, 0.8, 0.8, 0.8);
+        }
+        sizes[v] = hasScale ? Math.exp((vals[iScale0] + vals[iScale1] + vals[iScale2]) / 3) : 1.0;
+        alphas[v] = hasOpacity ? Math.min(1.0, sigmoid(vals[iOpacity]) * 1.5) : 1.0;
+      }
+    } else {
+      const dv = new DataView(buffer, headerByteLength);
+      const rowSize = properties.reduce((sum, p) => sum + typeSizes[p.type], 0);
+      const propOffsets = [];
+      let acc = 0;
+      for (const p of properties) {
+        propOffsets.push(acc);
+        acc += typeSizes[p.type];
+      }
+
+      const readVal = (rowOffset, propIdx) => {
+        const p = properties[propIdx];
+        const off = rowOffset + propOffsets[propIdx];
+        switch (p.type) {
+          case 'char': case 'int8': return dv.getInt8(off);
+          case 'uchar': case 'uint8': return dv.getUint8(off);
+          case 'short': case 'int16': return dv.getInt16(off, true);
+          case 'ushort': case 'uint16': return dv.getUint16(off, true);
+          case 'int': case 'int32': return dv.getInt32(off, true);
+          case 'uint': case 'uint32': return dv.getUint32(off, true);
+          case 'float': case 'float32': return dv.getFloat32(off, true);
+          case 'double': case 'float64': return dv.getFloat64(off, true);
+          default: return 0;
+        }
+      };
+
+      for (let v = 0; v < vertexCount; v++) {
+        const rowOffset = v * rowSize;
+        positions[v * 3 + 0] = readVal(rowOffset, ix);
+        positions[v * 3 + 1] = readVal(rowOffset, iy);
+        positions[v * 3 + 2] = readVal(rowOffset, iz);
+        if (hasDirectRGB) {
+          assignColor(v, readVal(rowOffset, ir) / 255, readVal(rowOffset, ig) / 255, readVal(rowOffset, ib) / 255);
+        } else if (hasSHColor) {
+          assignColor(v,
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * readVal(rowOffset, ifdc0))),
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * readVal(rowOffset, ifdc1))),
+            Math.min(1, Math.max(0, 0.5 + SH_C0 * readVal(rowOffset, ifdc2))));
+        } else {
+          assignColor(v, 0.8, 0.8, 0.8);
+        }
+        sizes[v] = hasScale ? Math.exp((readVal(rowOffset, iScale0) + readVal(rowOffset, iScale1) + readVal(rowOffset, iScale2)) / 3) : 1.0;
+        alphas[v] = hasOpacity ? Math.min(1.0, sigmoid(readVal(rowOffset, iOpacity)) * 1.5) : 1.0;
+      }
+    }
+
+    return { positions, colors, sizes, alphas, vertexCount };
+  }
+
+  // Shader Material khusus Alpha-Blending tanpa Artifact Depth-Write
+  function createMeshLikeSplatMaterial(baseScale) {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uBaseScale: { value: baseScale }
+      },
+      vertexShader: `
+        attribute float aSize;
+        attribute float aAlpha;
+        varying vec3 vColor;
+        varying float vAlpha;
+        uniform float uBaseScale;
+        void main() {
+          vColor = color;
+          vAlpha = aAlpha;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          float dist = max(0.01, -mvPosition.z);
+          float sizePx = (uBaseScale * aSize * 1800.0) / dist;
+          gl_PointSize = clamp(sizePx, 2.0, 500.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vec2 coord = gl_PointCoord - vec2(0.5);
+          float r2 = dot(coord, coord) * 4.0;
+          if (r2 > 1.0) discard;
+          float alpha = smoothstep(1.0, 0.1, r2) * vAlpha;
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false, // Nonaktifkan depth write agar blending transparan berjalan mulus
+      depthTest: true,
+      blending: THREE.NormalBlending
+    });
+  }
+
+  let rawPositions = null;
+  let rawColors = null;
+  let rawSizes = null;
+  let rawAlphas = null;
+  let isSorting = false;
+
+  function triggerDepthSort() {
+    if (!sortWorker || !pointCloud || isSorting) return;
+    isSorting = true;
+
+    const viewMatrix = new THREE.Matrix4();
+    viewMatrix.multiplyMatrices(camera.matrixWorldInverse, pointCloud.matrixWorld);
+
+    sortWorker.postMessage({
+      viewMatrix: viewMatrix.elements
+    });
+  }
+
+  function buildPointCloud(parsed) {
+    if (pointCloud) {
+      scene.remove(pointCloud);
+      pointCloud.geometry.dispose();
+      pointCloud.material.dispose();
+      pointCloud = null;
+    }
+
+    initWorker();
+
+    rawPositions = parsed.positions;
+    rawColors = parsed.colors;
+    rawSizes = parsed.sizes;
+    rawAlphas = parsed.alphas;
+
+    // Kirim posisi awal ke Web Worker
+    sortWorker.postMessage({ positions: rawPositions.buffer }, [rawPositions.buffer.slice(0)]);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(rawPositions), 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(rawColors), 3));
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(rawSizes), 1));
+    geometry.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(rawAlphas), 1));
+    geometry.computeBoundingSphere();
+
+    const sphere = geometry.boundingSphere;
+    const radius = Math.max(sphere.radius, 0.01);
+
+    const baseScale = radius * 0.05;
+    const material = createMeshLikeSplatMaterial(baseScale);
+
+    pointCloud = new THREE.Points(geometry, material);
+
+    if (ROTATE_180) {
+      if (ROTATE_180_AXIS === 'x') pointCloud.rotation.x = Math.PI;
+      else if (ROTATE_180_AXIS === 'y') pointCloud.rotation.y = Math.PI;
+      else if (ROTATE_180_AXIS === 'z') pointCloud.rotation.z = Math.PI;
+    }
+
+    // Callback saat worker selesai mengurutkan
+    sortWorker.onmessage = function(e) {
+      isSorting = false;
+      const sortedIndices = new Uint32Array(e.data.indices);
+      const count = sortedIndices.length;
+
+      const posAttr = pointCloud.geometry.attributes.position;
+      const colAttr = pointCloud.geometry.attributes.color;
+      const sizeAttr = pointCloud.geometry.attributes.aSize;
+      const alphaAttr = pointCloud.geometry.attributes.aAlpha;
+
+      for (let i = 0; i < count; i++) {
+        const idx = sortedIndices[i];
+        posAttr.setXYZ(i, rawPositions[idx * 3], rawPositions[idx * 3 + 1], rawPositions[idx * 3 + 2]);
+        colAttr.setXYZ(i, rawColors[idx * 3], rawColors[idx * 3 + 1], rawColors[idx * 3 + 2]);
+        sizeAttr.setX(i, rawSizes[idx]);
+        alphaAttr.setX(i, rawAlphas[idx]);
+      }
+
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+      sizeAttr.needsUpdate = true;
+      alphaAttr.needsUpdate = true;
+    };
+
+    scene.add(pointCloud);
+
+    const center = sphere.center.clone();
+    if (ROTATE_180) center.applyEuler(pointCloud.rotation);
+
+    controls.target.copy(center);
+    controls.spherical.radius = radius * 2.2;
+    controls.spherical.theta = Math.PI / 4;
+    controls.spherical.phi = Math.PI / 2.4;
+    updateCameraFromControls();
+  }
+
+  function processArrayBuffer(arrayBuffer) {
+    try {
+      const parsed = parsePLY(arrayBuffer);
+      buildPointCloud(parsed);
+      dropZone.style.display = 'none';
+    } catch (err) {
+      showError('Gagal memuat file .ply: ' + err.message);
+    } finally {
+      loadingMsg.style.display = 'none';
+    }
+  }
+
+  function showError(message) {
+    errMsg.textContent = message;
+    errMsg.style.display = 'block';
+    dropZone.style.display = 'flex';
+  }
+
+  function loadFile(file) {
+    loadingMsg.style.display = 'block';
+    errMsg.style.display = 'none';
+    dropZone.style.display = 'none';
+    const reader = new FileReader();
+    reader.onload = (e) => processArrayBuffer(e.target.result);
+    reader.onerror = () => {
+      loadingMsg.style.display = 'none';
+      showError('Gagal membaca file.');
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function autoLoadFromConfig() {
+    if (!PLY_FILE_PATH) {
+      dropZone.style.display = 'flex';
+      return;
+    }
+    loadingMsg.style.display = 'block';
+    dropZone.style.display = 'none';
+    fetch(PLY_FILE_PATH)
+      .then((res) => {
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' saat mengambil file.');
+        return res.arrayBuffer();
+      })
+      .then((buf) => processArrayBuffer(buf))
+      .catch((err) => {
+        loadingMsg.style.display = 'none';
+        showError(
+          'Gagal memuat otomatis dari "' + PLY_FILE_PATH + '". ' + err.message +
+          ' Jalankan file ini lewat server lokal (contoh: python -m http.server) atau pilih file secara manual di bawah.'
+        );
+      });
+  }
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
+  });
+
+  ['dragover', 'drop'].forEach(evt => {
+    window.addEventListener(evt, (e) => e.preventDefault());
+  });
+  window.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      loadFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+    updateGizmo();
+  }
+  animate();
+
+  autoLoadFromConfig();
+})();
+</script>
+
+</body>
+</html>
